@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Work Hours Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background-color: #f5f9ff;
+        }
+
+        h1 {
+            color: #337ab7;
+        }
+
+        table {
+            margin: 20px auto;
+            border-collapse: collapse;
+            width: 90%;
+            max-width: 800px;
+            background-color: #fff;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        th, td {
+            padding: 12px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        th {
+            background-color: #337ab7;
+            color: white;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background-color: #337ab7;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #286090;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .output {
+            margin-top: 20px;
+            font-size: 1.2em;
+        }
+
+        .weekly-summary {
+            margin-top: 20px;
+            font-size: 1.1em;
+            color: #337ab7;
+            font-weight: bold;
+        }
+
+        .chart-container {
+            margin: 40px auto;
+            max-width: 800px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Work Hours Tracker</h1>
+        <div>
+            <button id="start">Start</button>
+            <button id="pause">Pause</button>
+            <button id="end">End</button>
+            <button id="export-csv">Export as CSV</button>
+            <button id="clear-data">Clear Data</button>
+        </div>
+
+        <table id="sessions-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Start Time</th>
+                    <th>End Time</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Table rows will be dynamically added here -->
+            </tbody>
+        </table>
+
+        <div class="output" id="output">Started at: --</div>
+        <div class="weekly-summary" id="weekly-summary">Weekly Total: 0h 0m</div>
+
+        <div class="chart-container">
+            <canvas id="weeklyChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_KEY = "workSessions";
+        let currentSession = JSON.parse(localStorage.getItem("currentSession")) || null;
+
+        function formatDate(date) {
+            return date.toLocaleString("en-US", { weekday: "short" }) + " " + date.getDate() + "-" + (date.getMonth() + 1);
+        }
+
+        function formatTime(date) {
+            return date.toLocaleString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+        }
+
+        function calculateDuration(start, end) {
+            const diffMs = end - start;
+            const totalMinutes = Math.round(diffMs / (1000 * 60));
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            return { hours, minutes, formatted: `${hours}h ${minutes}m` };
+        }
+
+        function getStoredSessions() {
+            return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+        }
+
+        function saveSession(session) {
+            const sessions = getStoredSessions();
+            sessions.push(session);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+        }
+
+        function renderSessions() {
+            const sessions = getStoredSessions();
+            const tableBody = document.querySelector("#sessions-table tbody");
+            tableBody.innerHTML = "";
+
+            if (sessions.length === 0) {
+                tableBody.innerHTML = "<tr><td colspan='4'>No sessions recorded yet.</td></tr>";
+                return;
+            }
+
+            let weeklyMinutes = 0;
+            let currentDay = "";
+            const dailyDurations = {};
+
+            sessions.forEach((session, index) => {
+                const isSameDay = session.date === currentDay;
+
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    ${!isSameDay ? `<td rowspan='${sessions.filter(s => s.date === session.date).length}'>${session.date}</td>` : ""}
+                    <td>${session.startTime}</td>
+                    <td>${session.endTime || "--"}</td>
+                    <td>${session.duration || "--"}</td>
+                `;
+
+                tableBody.appendChild(row);
+                currentDay = session.date;
+
+                if (session.duration) {
+                    const [hours, minutes] = session.duration.split("h ")[0].split("m").map(Number);
+                    const totalMinutes = hours * 60 + (minutes || 0);
+                    weeklyMinutes += totalMinutes;
+
+                    dailyDurations[session.date] = (dailyDurations[session.date] || 0) + totalMinutes;
+                }
+            });
+
+            const weeklyHours = Math.floor(weeklyMinutes / 60);
+            const weeklyRemainder = weeklyMinutes % 60;
+            document.getElementById("weekly-summary").innerText = `Weekly Total: ${weeklyHours}h ${weeklyRemainder}m`;
+
+            renderChart(dailyDurations);
+        }
+
+        function saveCurrentSession() {
+            localStorage.setItem("currentSession", JSON.stringify(currentSession));
+        }
+
+        function renderChart(dailyDurations) {
+            const ctx = document.getElementById("weeklyChart").getContext("2d");
+            const labels = Object.keys(dailyDurations);
+            const data = Object.values(dailyDurations).map(minutes => Math.round(minutes / 60 * 100) / 100);
+
+            new Chart(ctx, {
+                type: "bar",
+                data: {
+                    labels,
+                    datasets: [{
+                        label: "Hours Worked",
+                        data,
+                        backgroundColor: "#337ab7",
+                        borderColor: "#286090",
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: "Hours"
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        document.getElementById("start").addEventListener("click", () => {
+            if (currentSession) return alert("A session is already active!");
+
+            const now = new Date();
+            currentSession = { startTime: now, date: formatDate(now) };
+            saveCurrentSession();
+            document.getElementById("output").innerText = `Started at: ${formatTime(now)}`;
+            renderSessions();
+        });
+
+        document.getElementById("pause").addEventListener("click", () => {
+            if (!currentSession) return alert("No active session to pause!");
+            const now = new Date();
+            const duration = calculateDuration(new Date(currentSession.startTime), now);
+
+            const session = {
+                date: currentSession.date,
+                startTime: formatTime(new Date(currentSession.startTime)),
+                endTime: formatTime(now),
+                duration: duration.formatted
+            };
+
+            saveSession(session);
+            currentSession = null;
+            localStorage.removeItem("currentSession");
+            document.getElementById("output").innerText = "Session paused.";
+            renderSessions();
+        });
+
+        document.getElementById("end").addEventListener("click", () => {
+            document.getElementById("pause").click();
+        });
+
+        document.getElementById("clear-data").addEventListener("click", () => {
+            if (confirm("Are you sure you want to clear all data?")) {
+                localStorage.removeItem(STORAGE_KEY);
+                localStorage.removeItem("currentSession");
+                currentSession = null;
+                document.getElementById("output").innerText = "All data cleared!";
+                renderSessions();
+            }
+        });
+
+        document.getElementById("export-csv").addEventListener("click", () => {
+            const sessions = getStoredSessions();
+            const csvRows = [
+                ["Date", "Start Time", "End Time", "Duration"],
+                ...sessions.map(session => [session.date, session.startTime, session.endTime || "--", session.duration || "--"])
+            ];
+
+            const csvContent = csvRows.map(row => row.join(",")).join("\n");
+            const blob = new Blob([csvContent], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "work_sessions.csv";
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        renderSessions();
+
+        if (currentSession) {
+            document.getElementById("output").innerText = `Session resumed: ${formatTime(new Date(currentSession.startTime))}`;
+        }
+    </script>
+</body>
+</html>
