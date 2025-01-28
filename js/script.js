@@ -1,15 +1,17 @@
 const STORAGE_KEY = "workSessions";
 let currentSession = JSON.parse(localStorage.getItem("currentSession")) || null;
+let liveCounterInterval = null;
 
-// Format dates and times
+// Format date and time
 function formatDate(date) {
-    return date.toLocaleString("en-US", { weekday: "short" }) + " " + date.getDate() + "-" + (date.getMonth() + 1);
+    return date.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 function formatTime(date) {
     return date.toLocaleString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
+// Calculate duration and round to 5 mins
 function calculateDuration(start, end) {
     const diffMs = end - start;
     const totalMinutes = Math.round(diffMs / (1000 * 60) / 5) * 5; // Round to 5 mins
@@ -31,35 +33,42 @@ function saveSession(session) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
 }
 
-// Render all sessions in the table
+// Render sessions grouped by date with total hours per day
 function renderSessions() {
     const sessions = getStoredSessions();
     const tableBody = document.querySelector("#sessions-table tbody");
     tableBody.innerHTML = "";
 
+    // Group sessions by date
+    const groupedByDate = sessions.reduce((acc, session) => {
+        acc[session.date] = acc[session.date] || [];
+        acc[session.date].push(session);
+        return acc;
+    }, {});
+
     let weeklyMinutes = 0;
     const dailyDurations = {};
 
-    sessions.forEach((session) => {
+    Object.keys(groupedByDate).forEach((date) => {
+        const totalMinutes = groupedByDate[date].reduce((sum, session) => {
+            const durationParts = session.duration.split(/[hm]/).map(Number);
+            return sum + (durationParts[0] || 0) * 60 + (durationParts[1] || 0);
+        }, 0);
+
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        dailyDurations[date] = totalMinutes;
+
         const row = document.createElement("tr");
         row.innerHTML = `
-            <td>${session.date}</td>
-            <td>${session.startTime}</td>
-            <td>${session.endTime || "--"}</td>
-            <td>${session.duration || "--"}</td>
+            <td>${date}</td>
+            <td>${hours}h ${minutes}m</td>
         `;
         tableBody.appendChild(row);
 
-        if (session.duration) {
-            const durationParts = session.duration.split(/[hm]/).map(Number);
-            const totalMinutes = (durationParts[0] || 0) * 60 + (durationParts[1] || 0);
-            weeklyMinutes += totalMinutes;
-
-            dailyDurations[session.date] = (dailyDurations[session.date] || 0) + totalMinutes;
-        }
+        weeklyMinutes += totalMinutes;
     });
 
-    // Update weekly summary
     const weeklyHours = Math.floor(weeklyMinutes / 60);
     const weeklyRemainder = weeklyMinutes % 60;
     document.getElementById("weekly-summary").innerText = `Weekly Total: ${weeklyHours}h ${weeklyRemainder}m`;
@@ -99,6 +108,24 @@ function renderChart(dailyDurations) {
     });
 }
 
+// Update live counter for active session
+function startLiveCounter() {
+    if (!currentSession) return;
+    if (liveCounterInterval) clearInterval(liveCounterInterval);
+
+    liveCounterInterval = setInterval(() => {
+        const now = new Date();
+        const duration = calculateDuration(new Date(currentSession.startTime), now);
+        document.getElementById("live-counter").innerText = `Duration: ${duration}`;
+    }, 1000);
+}
+
+// Stop live counter
+function stopLiveCounter() {
+    clearInterval(liveCounterInterval);
+    document.getElementById("live-counter").innerText = "Duration: 0h 0m";
+}
+
 // Event listeners
 document.getElementById("start").addEventListener("click", () => {
     if (currentSession) {
@@ -110,6 +137,7 @@ document.getElementById("start").addEventListener("click", () => {
     currentSession = { startTime: now, date: formatDate(now) };
     localStorage.setItem("currentSession", JSON.stringify(currentSession));
     document.getElementById("output").innerText = `Started at: ${formatTime(now)}`;
+    startLiveCounter();
 });
 
 document.getElementById("pause").addEventListener("click", () => {
@@ -132,6 +160,7 @@ document.getElementById("pause").addEventListener("click", () => {
     currentSession = null;
     localStorage.removeItem("currentSession");
     document.getElementById("output").innerText = "Session paused.";
+    stopLiveCounter();
     renderSessions();
 });
 
@@ -141,6 +170,7 @@ document.getElementById("clear-data").addEventListener("click", () => {
         localStorage.removeItem("currentSession");
         currentSession = null;
         document.getElementById("output").innerText = "All data cleared!";
+        stopLiveCounter();
         renderSessions();
     }
 });
