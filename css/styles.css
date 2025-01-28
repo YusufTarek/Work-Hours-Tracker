@@ -50,6 +50,7 @@ button:hover {
 }
 
 .output,
+.live-counter,
 .weekly-summary {
     margin-top: 1.25rem;
     font-size: 1.2rem;
